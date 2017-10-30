@@ -1,0 +1,14 @@
+{
+  "name": "binder-be",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.3",
+    "express": "^4.14.0",
+    "firebase-admin": "^4.0.0",
+    "instafeed.js": "^1.4.1",
+    "simple-oauth2": "^1.0.0"
+  }
+}
