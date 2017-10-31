@@ -69,9 +69,9 @@ app.get(OAUTH_REDIRECT_PATH, (req, res) => {
   console.log('Need a secure cookie (i.e. not on localhost)?', secureCookie);
   res.cookie('state', state, {maxAge: 3600000, secure: secureCookie, httpOnly: true});
   const redirectUri = oauth2.authorizationCode.authorizeURL({
+      response_type: 'code',
     redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CODE_EXCHANGE_PATH}`,
-    state: state,
-    scope: OAUTH_SCOPES
+    state: state
   });
   console.log('Redirecting to:', redirectUri);
   res.redirect(redirectUri);
@@ -96,6 +96,7 @@ app.get(OAUTH_CALLBACK_PATH, (req, res) => {
 app.get(OAUTH_CODE_EXCHANGE_PATH, (req, res) => {
   console.log('Received auth code:', req.query.code);
   oauth2.authorizationCode.getToken({
+      grant_type: 'authorization_code',
     code: req.query.code,
     redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CALLBACK_PATH}`
   }).then(results => {
