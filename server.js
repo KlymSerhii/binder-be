@@ -1,18 +1,3 @@
-/**
- * Copyright 2016 Google Inc. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for t`he specific language governing permissions and
- * limitations under the License.
- */
 'use strict';
 
 // Modules imports
@@ -31,6 +16,9 @@ admin.initializeApp({
   databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
 });
 
+// const SERVER_HOST = '192.168.1.102';
+// const SERVER_PORT = 8000;
+
 // Linkedin OAuth 2 setup
 const credentials = {
   client: {
@@ -39,7 +27,8 @@ const credentials = {
   },
   auth: {
     tokenHost: 'https://www.linkedin.com',
-    tokenPath: '/oauth/v2/accessToken'
+      tokenPath: '/oauth/v2/accessToken',
+      authorizePath: '/oauth/v2/authorization'
   }
 };
 const oauth2 = require('simple-oauth2').create(credentials);
@@ -56,8 +45,14 @@ const APP_CUSTOM_SCHEME = 'linkedin-sign-in-demo';
 // Linkedin scopes requested.
 const OAUTH_SCOPES = 'basic';
 
+const options = {
+  ejectUnauthorized: false
+};
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 // ExpressJS setup
-const app = express();
+const app = express(options);
 app.enable('trust proxy');
 app.use(express.static('public'));
 app.use(express.static('node_modules/instafeed.js'));
@@ -75,53 +70,21 @@ app.get(OAUTH_REDIRECT_PATH, (req, res) => {
   res.cookie('state', state, {maxAge: 3600000, secure: secureCookie, httpOnly: true});
   const redirectUri = oauth2.authorizationCode.authorizeURL({
     redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CODE_EXCHANGE_PATH}`,
-    scope: OAUTH_SCOPES,
-    state: state
+    state: state,
+    scope: OAUTH_SCOPES
   });
   console.log('Redirecting to:', redirectUri);
   res.redirect(redirectUri);
 });
 
-/**
- * Exchanges a given Linkedin auth code passed in the 'code' URL query parameter for a Firebase auth token.
- * The request also needs to specify a 'state' query parameter which will be checked against the 'state' cookie to avoid
- * Session Fixation attacks.
- * This is meant to be used by Web Clients.
- */
-// app.get(OAUTH_CALLBACK_PATH, (req, res) => {
-//   console.log('Received state cookie:', req.cookies.state);
-//   console.log('Received state query parameter:', req.query.state);
-//   if (!req.cookies.state) {
-//     res.status(400).send('State cookie not set or expired. Maybe you took too long to authorize. Please try again.');
-//   } else if (req.cookies.state !== req.query.state) {
-//     res.status(400).send('State validation failed');
-//   }
-//   console.log('Received auth code:', req.query.code);
-//   oauth2.authorizationCode.getToken({
-//     code: req.query.code,
-//     redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CALLBACK_PATH}`
-//   }).then(results => {
-//     console.log('Auth code exchange result received:', results);
-//     // We have an Linkedin access token and the user identity now.
-//     const accessToken = results.access_token;
-//     const linkedinUserID = results.user.id;
-//     const profilePic = results.user.profile_picture;
-//     const userName = results.user.full_name;
-//
-//     // Create a Firebase account and get the Custom Auth Token.
-//     createFirebaseAccount(linkedinUserID, userName, profilePic, accessToken).then(firebaseToken => {
-//       // Serve an HTML page that signs the user in and updates the user profile.
-//       res.send(signInFirebaseTemplate(firebaseToken, userName, profilePic, accessToken));
-//     });
-//   });
-// });
+
 
 /**
  * Passes the auth code to your Mobile application by redirecting to a custom scheme URL. This serves as a fallback in
  * case App Link/Universal Links are not supported on the device.
  * Native Mobile apps should use this callback.
  */
-app.get(OAUTH_MOBILE_CALLBACK_PATH, (req, res) => {
+app.get(OAUTH_CALLBACK_PATH, (req, res) => {
   res.redirect(`${OAUTH_MOBILE_CALLBACK_PATH}?${req.originalUrl.split('?')[1]}`);
 });
 
@@ -132,9 +95,9 @@ app.get(OAUTH_MOBILE_CALLBACK_PATH, (req, res) => {
  */
 app.get(OAUTH_CODE_EXCHANGE_PATH, (req, res) => {
   console.log('Received auth code:', req.query.code);
-  oauth2.authCode.getToken({
+  oauth2.authorizationCode.getToken({
     code: req.query.code,
-    redirect_uri: `${OAUTH_MOBILE_CALLBACK_PATH}`
+    redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CALLBACK_PATH}`
   }).then(results => {
     console.log('Auth code exchange result received:', results);
 
@@ -144,17 +107,14 @@ app.get(OAUTH_CODE_EXCHANGE_PATH, (req, res) => {
       // Send the custom token, access token and profile data as a JSON object.
       res.send(firebaseToken);
     });
-  });
+  }).catch((error)=>{
+      res.send(error.context);
+      console.warn(error);
+  })
 });
 
 
-/**
- * Creates a Firebase account with the given user profile and returns a custom auth token allowing
- * signing-in this account.
- * Also saves the accessToken to the datastore at /linkedinAccessToken/$uid
- *
- * @returns {Promise<string>} The Firebase custom auth token in a promise.
- */
+
 function createFirebaseAccount(linkedinID, displayName, photoURL, accessToken) {
   // The UID we'll assign to the user.
   const uid = `linkedin:${linkedinID}`;
@@ -188,28 +148,6 @@ function createFirebaseAccount(linkedinID, displayName, photoURL, accessToken) {
   });
 }
 
-/**
- * Generates the HTML template that signs the user in Firebase using the given token and closes the
- * popup.
- */
-function signInFirebaseTemplate(token) {
-  return `
-    <script src="https://www.gstatic.com/firebasejs/3.6.0/firebase.js"></script>
-    <script>
-      var token = '${token}';
-      var config = {
-        apiKey: '${config.firebase.apiKey}'
-      };
-      var app = firebase.initializeApp(config);
-      app.auth().signInWithCustomToken(token).then(function() {
-        window.close();
-      });
-    </script>`;
-}
-
 // Start the server
 var port = process.env.PORT || 8000;
-var server = app.listen(port, function () {
-  console.log('App listening on port %s', server.address().port);
-  console.log('Press Ctrl+C to quit.');
-});
+var server = app.listen(port);
