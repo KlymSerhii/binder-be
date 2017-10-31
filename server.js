@@ -1,6 +1,7 @@
 'use strict';
 
 // Modules imports
+const request = require('request');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
@@ -69,7 +70,6 @@ app.get(OAUTH_REDIRECT_PATH, (req, res) => {
   console.log('Need a secure cookie (i.e. not on localhost)?', secureCookie);
   res.cookie('state', state, {maxAge: 3600000, secure: secureCookie, httpOnly: true});
   const redirectUri = oauth2.authorizationCode.authorizeURL({
-      response_type: 'code',
     redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CODE_EXCHANGE_PATH}`,
     state: state
   });
@@ -96,18 +96,31 @@ app.get(OAUTH_CALLBACK_PATH, (req, res) => {
 app.get(OAUTH_CODE_EXCHANGE_PATH, (req, res) => {
   console.log('Received auth code:', req.query.code);
   oauth2.authorizationCode.getToken({
-      grant_type: 'authorization_code',
     code: req.query.code,
-    redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CALLBACK_PATH}`
-  }).then(results => {
-    console.log('Auth code exchange result received:', results);
+    redirect_uri: `${req.protocol}://${req.get('host')}${OAUTH_CODE_EXCHANGE_PATH}`
+  }).then(res => {
+      const access_token = res.access_token;
+      console.log('access_token',access_token);
+      const options = {
+          url: 'https://api.linkedin.com/v1/people/~:(id,firstName,lastName,headline,picture-url)?format=json',
+          headers: {
+              'Authorization': `Bearer ${access_token}`,
+              'x-li-format': 'json'
+          }
+      };
+      request(options, (error, response, body) => {
+          console.log(response);
+          if (!error && response.statusCode == 200) {
+            const info = JSON.parse(body);
+            const {id,firstName,lastName,headline,pictureUrl} = info;
+            createFirebaseAccount(id,firstName,lastName,headline,pictureUrl, access_token).then(firebaseToken => {
+                res.send(firebaseToken);
+            })
 
-    // Create a Firebase Account and get the custom Auth Token.
-    createFirebaseAccount(results.user.id, results.user.full_name,
-        results.user.profile_picture, firebaseToken).then(firebaseToken => {
-      // Send the custom token, access token and profile data as a JSON object.
-      res.send(firebaseToken);
-    });
+          } else {
+            console.log(error);
+          }
+      });
   }).catch((error)=>{
       res.send(error.context);
       console.warn(error);
@@ -116,7 +129,7 @@ app.get(OAUTH_CODE_EXCHANGE_PATH, (req, res) => {
 
 
 
-function createFirebaseAccount(linkedinID, displayName, photoURL, accessToken) {
+function createFirebaseAccount(linkedinID, firstName, lastName, pictureUrl, headline, accessToken) {
   // The UID we'll assign to the user.
   const uid = `linkedin:${linkedinID}`;
 
@@ -126,15 +139,17 @@ function createFirebaseAccount(linkedinID, displayName, photoURL, accessToken) {
 
   // Create or update the user account.
   const userCreationTask = admin.auth().updateUser(uid, {
-    displayName: displayName,
-    photoURL: photoURL
+          displayName: firstName + ' ' + lastName,
+          headline: headline,
+          pictureUrl: pictureUrl
   }).catch(error => {
     // If user does not exists we create it.
     if (error.code === 'auth/user-not-found') {
       return admin.auth().createUser({
-        uid: uid,
-        displayName: displayName,
-        photoURL: photoURL
+          uid: uid,
+          displayName: firstName + ' ' + lastName,
+          headline: headline,
+          pictureUrl: pictureUrl
       });
     }
     throw error;

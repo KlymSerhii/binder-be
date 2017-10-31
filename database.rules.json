@@ -1,6 +1,6 @@
 {
   "rules": {
-    "instagramAccessToken": {
+    "linkedinAccessToken": {
       "$uid": {
         ".read": "auth.uid === $uid",
         ".write": "auth.uid === $uid"
